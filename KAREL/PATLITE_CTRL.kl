@@ -1,0 +1,212 @@
+--* coding: Shift-jis *--
+--
+--  --------------------------------------
+--  Released under the Apache 2.0 License.
+--  Yuki Meguro
+--  --------------------------------------
+--
+--  --------------------------------------
+--  Author: Yuki Meguro
+--
+--  Description:
+--    3色表示パトライト用
+--    各変数はペンダント上で設定を行って行います。
+--
+--  Dependancies: none
+--  --------------------------------------
+
+PROGRAM PATLITE_CTRL
+%NOLOCKGROUP
+%SYSTEM
+%NOBUSYLAMP
+%NOPAUSESHFT
+%NOABORT = ERROR + COMMAND 
+%NOPAUSE=ERROR+COMMAND+TPENABLE
+%COMMENT = 'PATLITE'
+TYPE
+            reg_ptl = STRUCTURE
+                buzzer_time: INTEGER
+            ENDSTRUCTURE
+
+        reg_list = STRUCTURE
+            PATLITE: reg_ptl
+        ENDSTRUCTURE
+        
+            io_ptl = STRUCTURE
+                ptl_green: INTEGER
+                ptl_yellow: INTEGER
+                ptl_red: INTEGER
+                ptl_buzzer: INTEGER 
+            ENDSTRUCTURE
+        
+        io_list = STRUCTURE
+            PATLITE: io_ptl
+        ENDSTRUCTURE
+
+        flg_list = STRUCTURE
+            buzzer_stop: INTEGER
+            active_stat: INTEGER
+            prog_stop: INTEGER
+        ENDSTRUCTURE
+
+    data_block = STRUCTURE
+        register_no: reg_list 
+        io_no: io_list
+        flg_no: flg_list
+    ENDSTRUCTURE
+
+    --  構造図
+    --    SETTINGS
+    --    ├ REGISTER_NO
+    --    │ └ PATLITE
+    --    │ 　 └ BUZZER_TIME
+    --    ├ IO_NO
+    --    │ └ PATLITE
+    --    │ 　 ├ PTL_GREEN
+    --    │ 　 ├ PTL_YELLOW
+    --    │ 　 ├ PTL_RED
+    --    │ 　 └ PTL_BUZZER
+    --    └ FLG_NO
+    --    　 ├ BUZZER_STOP
+    --    　 ├ ACTIVE_STAT
+    --    　 └ PROG_STOP
+
+CONST
+    prog_name = 'PATLITE_CTRL'
+VAR
+    settings: data_block
+    active: BOOLEAN
+
+
+    ROUTINE CmtSet
+    VAR
+        stat: INTEGER
+    BEGIN
+        SET_REG_CMT(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, 'BUZZER_TIME', stat)
+
+        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_GREEN, 'PTL_GREEN', stat)
+        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_YELLOW, 'PTL_YELLOW', stat)
+        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_RED, 'PTL_RED', stat)
+        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_BUZZER, 'PTL_BUZZER', stat)
+
+        SET_PORT_CMT(35, SETTINGS.FLG_NO.BUZZER_STOP, 'BUZZER_STOP', stat)
+        SET_PORT_CMT(35, SETTINGS.FLG_NO.ACTIVE_STAT, 'ACTIVE_STAT', stat)
+        SET_PORT_CMT(35, SETTINGS.FLG_NO.PROG_STOP, 'PROG_STOP', stat)
+    END CmtSet
+
+
+    ROUTINE GetRegVal: INTEGER
+    VAR
+        real_flag: BOOLEAN
+        reg_int: INTEGER
+        reg_real: REAL
+        stat: INTEGER
+    BEGIN
+        GET_REG(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, real_flag, reg_int, reg_real, stat)
+        IF real_flag = TRUE THEN
+            WRITE TPERROR (CHR(128), CR)
+            WRITE TPERROR('Register Value Err.', CR)
+            ABORT
+        ENDIF
+        RETURN(reg_int)
+    END GetRegVal
+
+
+    ROUTINE SimplePLC(buz_time: INTEGER)
+    VAR
+        i: INTEGER
+    BEGIN
+        CONDITION[1]:
+            --  KAREL Active status
+            WHEN active = TRUE DO
+                FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = ON
+                ENABLE CONDITION[1]
+            WHEN active = FALSE DO
+                FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = OFF
+                ENABLE CONDITION[1]
+        ENDCONDITION
+
+        CONDITION[2]:
+            --  PATLITE 緑点灯
+            WHEN (UOUT[3] = ON) AND (UOUT[8] = OFF) DO    
+            --  UOUT[3:Prg running], UOUT[8:TP enabled]
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = ON
+                ENABLE CONDITION[2]
+            WHEN UOUT[3] = OFF DO   --  UOUT[3:Prg running]
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = OFF
+                ENABLE CONDITION[2]
+        ENDCONDITION
+
+        CONDITION[3]:
+            --  PATLITE 黄点灯
+            WHEN (UOUT[3] = OFF) AND (UOUT[6] = OFF) AND (UOUT[7] = ON) DO   
+            --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch] 
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = ON
+                ENABLE CONDITION[3]
+            WHEN (UOUT[3] = ON) OR (UOUT[6] = ON) OR (UOUT[7] = OFF) DO
+            --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch] 
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = OFF
+                ENABLE CONDITION[3]
+        ENDCONDITION
+
+        CONDITION[4]:
+            --  PATLITE 赤点灯
+            WHEN UOUT[6] = ON DO    --  UOUT[6:Fault]
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = ON
+                ENABLE CONDITION[4]
+            WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = OFF
+                ENABLE CONDITION[4]
+        ENDCONDITION
+    
+        CONDITION[5]:
+            --  PATLITE ブザー
+            WHEN UOUT[6]+ DO    --  UOUT[6:Fault]
+                PULSE DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] FOR buz_time
+                ENABLE CONDITION[5]
+            WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+                ENABLE CONDITION[5]
+        ENDCONDITION
+    
+        CONDITION[6]:
+            --  PATLITE ブザー停止
+            WHEN FLG[SETTINGS.FLG_NO.BUZZER_STOP] = ON DO
+                DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+                FLG[SETTINGS.FLG_NO.BUZZER_STOP] = OFF
+                ENABLE CONDITION[6]
+        ENDCONDITION
+
+        FOR i = 1 TO 6 DO
+            ENABLE CONDITION[i]
+        ENDFOR
+
+    END SimplePLC
+
+
+    ROUTINE Main
+    VAR
+        reg_val: INTEGER
+        loop: BOOLEAN
+    BEGIN
+        active = TRUE
+        CmtSet
+        reg_val = GetRegVal
+        SimplePLC(reg_val)
+        loop = TRUE
+        WHILE loop DO
+            --Program
+            IF FLG[SETTINGS.FLG_NO.PROG_STOP] = ON THEN
+                loop = FALSE
+                FLG[SETTINGS.FLG_NO.PROG_STOP] = ON = OFF
+            ENDIF
+            DELAY 20
+        ENDWHILE
+        active = FALSE
+        DELAY 20
+    END Main
+
+
+BEGIN
+    Main
+END PATLITE_CTRL
