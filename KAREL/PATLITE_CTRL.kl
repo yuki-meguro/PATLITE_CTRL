@@ -44,8 +44,8 @@ TYPE
         ENDSTRUCTURE
 
         flg_list = STRUCTURE
-            buzzer_stop: INTEGER
             active_stat: INTEGER
+            buzzer_stop: INTEGER
             prog_stop: INTEGER
         ENDSTRUCTURE
 
@@ -53,6 +53,7 @@ TYPE
         register_no: reg_list 
         io_no: io_list
         flg_no: flg_list
+        cmtset_done: BOOLEAN 
     ENDSTRUCTURE
 
     --  構造図
@@ -67,8 +68,8 @@ TYPE
     --    │ 　 ├ PTL_RED
     --    │ 　 └ PTL_BUZZER
     --    └ FLG_NO
-    --    　 ├ BUZZER_STOP
     --    　 ├ ACTIVE_STAT
+    --    　 ├ BUZZER_STOP
     --    　 └ PROG_STOP
 
 CONST
@@ -80,108 +81,187 @@ VAR
 
     ROUTINE CmtSet
     VAR
-        stat: INTEGER
+        entry, stat: INTEGER
+        sys_val: BOOLEAN
     BEGIN
-        SET_REG_CMT(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, 'BUZZER_TIME', stat)
+        GET_VAR(entry, prog_name, 'SETTINGS.CMTSET_DONE', sys_val, stat)
+        IF stat <> 0 THEN
+            sys_val = FALSE
+        ENDIF
 
-        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_GREEN, 'PTL_GREEN', stat)
-        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_YELLOW, 'PTL_YELLOW', stat)
-        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_RED, 'PTL_RED', stat)
-        SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_BUZZER, 'PTL_BUZZER', stat)
-
-        SET_PORT_CMT(35, SETTINGS.FLG_NO.BUZZER_STOP, 'BUZZER_STOP', stat)
-        SET_PORT_CMT(35, SETTINGS.FLG_NO.ACTIVE_STAT, 'ACTIVE_STAT', stat)
-        SET_PORT_CMT(35, SETTINGS.FLG_NO.PROG_STOP, 'PROG_STOP', stat)
+        IF sys_val = FALSE THEN
+            IF SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME <> 0 THEN
+                SET_REG_CMT(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, 'BUZZER_TIME', stat)
+            ENDIF
+            IF SETTINGS.IO_NO.PATLITE.PTL_GREEN <> 0 THEN
+                SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_GREEN, 'PTL_GREEN', stat)
+            ENDIF
+            IF SETTINGS.IO_NO.PATLITE.PTL_YELLOW <> 0 THEN
+                SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_YELLOW, 'PTL_YELLOW', stat)
+            ENDIF
+            IF SETTINGS.IO_NO.PATLITE.PTL_RED <> 0 THEN
+                SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_RED, 'PTL_RED', stat)
+            ENDIF
+            IF SETTINGS.IO_NO.PATLITE.PTL_BUZZER <> 0 THEN
+                SET_PORT_CMT(2, SETTINGS.IO_NO.PATLITE.PTL_BUZZER, 'PTL_BUZZER', stat)
+            ENDIF
+            IF SETTINGS.FLG_NO.BUZZER_STOP <> 0 THEN
+                SET_PORT_CMT(35, SETTINGS.FLG_NO.BUZZER_STOP, 'BUZZER_STOP', stat)
+            ENDIF
+            IF SETTINGS.FLG_NO.ACTIVE_STAT <> 0 THEN
+                SET_PORT_CMT(35, SETTINGS.FLG_NO.ACTIVE_STAT, 'ACTIVE_STAT', stat)
+            ENDIF
+            IF SETTINGS.FLG_NO.PROG_STOP <> 0 THEN
+                SET_PORT_CMT(35, SETTINGS.FLG_NO.PROG_STOP, 'PROG_STOP', stat)
+            ENDIF
+        ENDIF
+        SETTINGS.CMTSET_DONE = TRUE
     END CmtSet
 
 
     ROUTINE GetRegVal: INTEGER
+    -- READ BUZZEZR_TIME
     VAR
         real_flag: BOOLEAN
         reg_int: INTEGER
         reg_real: REAL
         stat: INTEGER
     BEGIN
-        GET_REG(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, real_flag, reg_int, reg_real, stat)
-        IF real_flag = TRUE THEN
-            WRITE TPERROR (CHR(128), CR)
-            WRITE TPERROR('Register Value Err.', CR)
-            ABORT
+        IF (SETTINGS.IO_NO.PATLITE.PTL_BUZZER <> 0) AND (SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME <> 0) THEN
+            GET_REG(SETTINGS.REGISTER_NO.PATLITE.BUZZER_TIME, real_flag, reg_int, reg_real, stat)
+            IF real_flag = TRUE THEN
+                WRITE TPERROR (CHR(128), CR)
+                WRITE TPERROR('Register Value Err.', CR)
+                ABORT
+            ENDIF
+        ELSE
+            reg_int = -1
         ENDIF
         RETURN(reg_int)
     END GetRegVal
 
 
     ROUTINE SimplePLC(buz_time: INTEGER)
+    BEGIN
+        IF SETTINGS.FLG_NO.ACTIVE_STAT <> 0 THEN
+            CONDITION[1]:
+                --  KAREL Active status
+                WHEN active = TRUE DO
+                    FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = ON
+                    ENABLE CONDITION[1]
+                WHEN active = FALSE DO
+                    FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = OFF
+                    ENABLE CONDITION[1]
+            ENDCONDITION
+            ENABLE CONDITION[1]
+        ENDIF
+
+        IF SETTINGS.IO_NO.PATLITE.PTL_GREEN <> 0 THEN
+            CONDITION[2]:
+                --  PATLITE 緑点灯
+                WHEN (UOUT[3] = ON) AND (UOUT[8] = OFF) DO    
+                --  UOUT[3:Prg running], UOUT[8:TP enabled]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = ON
+                    ENABLE CONDITION[2]
+                WHEN UOUT[3] = OFF DO   --  UOUT[3:Prg running]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = OFF
+                    ENABLE CONDITION[2]
+            ENDCONDITION
+            ENABLE CONDITION[2]
+        ENDIF
+
+        IF SETTINGS.IO_NO.PATLITE.PTL_YELLOW <> 0 THEN
+            CONDITION[3]:
+                --  PATLITE 黄点灯
+                WHEN (UOUT[3] = OFF) AND (UOUT[6] = OFF) AND (UOUT[7] = ON) AND (UOUT[8] = OFF) DO   
+                --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch], UOUT[8:TP enabled]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = ON
+                    ENABLE CONDITION[3]
+                WHEN (UOUT[3] = ON) OR (UOUT[6] = ON) OR (UOUT[7] = OFF) OR (UOUT[8] = ON) DO
+                --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch], UOUT[8:TP enabled]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = OFF
+                    ENABLE CONDITION[3]
+            ENDCONDITION
+            ENABLE CONDITION[3]
+        ENDIF
+
+        IF SETTINGS.IO_NO.PATLITE.PTL_RED <> 0 THEN
+            CONDITION[4]:
+                --  PATLITE 赤点灯
+                WHEN (UOUT[6] = ON) AND (UOUT[8] = OFF) DO    
+                    --  UOUT[6:Fault],  UOUT[8:TP enabled]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = ON
+                    ENABLE CONDITION[4]
+                WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = OFF
+                    ENABLE CONDITION[4]
+            ENDCONDITION
+            ENABLE CONDITION[4]
+        ENDIF
+
+        IF SETTINGS.IO_NO.PATLITE.PTL_BUZZER <> 0 THEN
+            IF buz_time < 0 THEN
+                CONDITION[5]:
+                    --  PATLITE ブザー
+                    WHEN (UOUT[6]+) AND  (UOUT[8] = OFF) DO    
+                        --  UOUT[6:Fault], UOUT[8:TP enabled]
+                        DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = ON
+                        ENABLE CONDITION[5]
+                    WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
+                        DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+                        ENABLE CONDITION[5]
+                ENDCONDITION
+            ENABLE CONDITION[5]
+            ENDIF
+
+            IF buz_time > 0 THEN
+                CONDITION[5]:
+                    --  PATLITE ブザー
+                    WHEN (UOUT[6]+) AND (UOUT[8] = OFF) DO    
+                    --  UOUT[6:Fault], UOUT[8:TP enabled]
+                        PULSE DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] FOR buz_time
+                        ENABLE CONDITION[5]
+                    WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
+                        DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+                        ENABLE CONDITION[5]
+                ENDCONDITION
+                ENABLE CONDITION[5]
+            ENDIF
+        ENDIF
+
+        IF SETTINGS.FLG_NO.BUZZER_STOP <> 0 THEN
+            CONDITION[6]:
+                --  PATLITE ブザー停止
+                WHEN FLG[SETTINGS.FLG_NO.BUZZER_STOP] = ON DO
+                    DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+                    FLG[SETTINGS.FLG_NO.BUZZER_STOP] = OFF
+                    ENABLE CONDITION[6]
+            ENDCONDITION
+            ENABLE CONDITION[6]
+        ENDIF
+    END SimplePLC
+
+    ROUTINE StopPLC
     VAR
         i: INTEGER
     BEGIN
-        CONDITION[1]:
-            --  KAREL Active status
-            WHEN active = TRUE DO
-                FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = ON
-                ENABLE CONDITION[1]
-            WHEN active = FALSE DO
-                FLG[SETTINGS.FLG_NO.ACTIVE_STAT] = OFF
-                ENABLE CONDITION[1]
-        ENDCONDITION
-
-        CONDITION[2]:
-            --  PATLITE 緑点灯
-            WHEN (UOUT[3] = ON) AND (UOUT[8] = OFF) DO    
-            --  UOUT[3:Prg running], UOUT[8:TP enabled]
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = ON
-                ENABLE CONDITION[2]
-            WHEN UOUT[3] = OFF DO   --  UOUT[3:Prg running]
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = OFF
-                ENABLE CONDITION[2]
-        ENDCONDITION
-
-        CONDITION[3]:
-            --  PATLITE 黄点灯
-            WHEN (UOUT[3] = OFF) AND (UOUT[6] = OFF) AND (UOUT[7] = ON) DO   
-            --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch] 
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = ON
-                ENABLE CONDITION[3]
-            WHEN (UOUT[3] = ON) OR (UOUT[6] = ON) OR (UOUT[7] = OFF) DO
-            --  UOUT[3:Prg running], UOUT[6:Fault], UOUT[7:At perch] 
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = OFF
-                ENABLE CONDITION[3]
-        ENDCONDITION
-
-        CONDITION[4]:
-            --  PATLITE 赤点灯
-            WHEN UOUT[6] = ON DO    --  UOUT[6:Fault]
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = ON
-                ENABLE CONDITION[4]
-            WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = OFF
-                ENABLE CONDITION[4]
-        ENDCONDITION
-    
-        CONDITION[5]:
-            --  PATLITE ブザー
-            WHEN UOUT[6]+ DO    --  UOUT[6:Fault]
-                PULSE DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] FOR buz_time
-                ENABLE CONDITION[5]
-            WHEN UOUT[6] = OFF DO   --  UOUT[6:Fault]
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
-                ENABLE CONDITION[5]
-        ENDCONDITION
-    
-        CONDITION[6]:
-            --  PATLITE ブザー停止
-            WHEN FLG[SETTINGS.FLG_NO.BUZZER_STOP] = ON DO
-                DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
-                FLG[SETTINGS.FLG_NO.BUZZER_STOP] = OFF
-                ENABLE CONDITION[6]
-        ENDCONDITION
-
-        FOR i = 1 TO 6 DO
-            ENABLE CONDITION[i]
+        FOR i = 2 TO 10 DO
+            DISABLE CONDITION[i]            
         ENDFOR
 
-    END SimplePLC
+        IF SETTINGS.IO_NO.PATLITE.PTL_GREEN <> 0 THEN
+            DOUT[SETTINGS.IO_NO.PATLITE.PTL_GREEN] = OFF
+        ENDIF
+        IF SETTINGS.IO_NO.PATLITE.PTL_YELLOW <> 0 THEN
+            DOUT[SETTINGS.IO_NO.PATLITE.PTL_YELLOW] = OFF
+        ENDIF
+        IF SETTINGS.IO_NO.PATLITE.PTL_RED <> 0 THEN
+            DOUT[SETTINGS.IO_NO.PATLITE.PTL_RED] = OFF
+        ENDIF
+        IF SETTINGS.IO_NO.PATLITE.PTL_BUZZER <> 0 THEN
+            DOUT[SETTINGS.IO_NO.PATLITE.PTL_BUZZER] = OFF
+        ENDIF
+    END StopPLC
 
 
     ROUTINE Main
@@ -202,6 +282,8 @@ VAR
             ENDIF
             DELAY 20
         ENDWHILE
+        
+        StopPLC
         active = FALSE
         DELAY 20
     END Main
